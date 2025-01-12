@@ -129,18 +129,17 @@ impl PieceTable {
                 self.table.remove(entry_index);
                 self.table.insert(entry_index, new_entry);
             } else {
-                let first_length = entry_position;
                 let first_entry = Piece {
                     source: original_buffer_type.clone(),
                     start_index: original_entry.start_index,
-                    length: first_length - 1,
+                    length: entry_position,
                 };
 
-                let second_length = original_entry.length - first_length;
+                let second_length = original_entry.length - entry_position;
                 let second_entry = Piece {
                     source: original_buffer_type.clone(),
-                    start_index: original_entry.start_index + first_length,
-                    length: second_length,
+                    start_index: original_entry.start_index + entry_position + 1,
+                    length: second_length - 1,
                 };
 
                 self.table.remove(entry_index);
@@ -227,11 +226,9 @@ impl fmt::Display for PieceTable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut string = String::new();
         for entry in self.table.iter() {
-            /*
             if entry.length == 0 {
                 continue;
             }
-            */
             match entry.source {
                 BufferType::Original => {
                     let text = substring(&self.original, entry.start_index, entry.length);
