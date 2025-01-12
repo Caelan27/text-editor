@@ -274,12 +274,12 @@ mod tests {
             Piece {
                 source: BufferType::Original,
                 start_index: 0,
-                length: 15,
+                length: 16,
             },
             Piece {
                 source: BufferType::Original,
-                start_index: 16,
-                length: 28,
+                start_index: 17,
+                length: 27,
             },
         ];
 

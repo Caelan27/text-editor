@@ -15,6 +15,15 @@ impl Drop for CleanUp {
     }
 }
 
+pub fn create_key_event(code: KeyCode) -> KeyEvent {
+    KeyEvent {
+        code,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    }
+}
+
 fn find_index(lines: &Vec<String>, x: usize, y: usize) -> Option<usize> {
     dbg!(x, y);
     let mut char_count = 0;
@@ -429,8 +438,33 @@ impl Editor {
         }
     }
 
+    fn test_process_keypress(&mut self, key_event: KeyEvent) -> io::Result<bool> {
+        let lines = self.piece_table.lines();
+
+        match self.mode {
+            Mode::Normal => self.output.cursor_controller.normal_keypress(
+                key_event,
+                lines,
+                &mut self.mode,
+                self.file_path.clone(),
+                &mut self.piece_table,
+            ),
+            Mode::Insert => self.output.cursor_controller.insert_keypress(
+                key_event,
+                lines,
+                &mut self.mode,
+                &mut self.piece_table,
+            ),
+        }
+    }
+
     pub fn run(&mut self) -> io::Result<bool> {
         self.output.refresh_screen(&self.piece_table)?;
         self.process_keypress()
+    }
+
+    pub fn test_run(&mut self, key_event: KeyEvent) -> io::Result<bool> {
+        self.output.refresh_screen(&self.piece_table)?;
+        self.test_process_keypress(key_event)
     }
 }
