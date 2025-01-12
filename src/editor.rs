@@ -25,7 +25,6 @@ pub fn create_key_event(code: KeyCode) -> KeyEvent {
 }
 
 fn find_index(lines: &Vec<String>, x: usize, y: usize) -> Option<usize> {
-    dbg!(x, y);
     let mut char_count = 0;
     for (cur_y, line) in lines.iter().enumerate() {
         if line.is_empty() && cur_y == y {
@@ -83,7 +82,12 @@ impl CursorController {
         match key_event {
             KeyEvent {
                 code: KeyCode::Esc, ..
-            } => *mode = Mode::Normal,
+            } => {
+                *mode = Mode::Normal;
+                if self.cursor_x != 0 {
+                    self.cursor_x -= 1;
+                }
+            }
 
             KeyEvent {
                 code: KeyCode::Char(ch),
@@ -266,7 +270,6 @@ impl Write for EditorContents {
 }
 
 struct Output {
-    win_size: (usize, usize),
     editor_contents: EditorContents,
     cursor_controller: CursorController,
 }
@@ -275,9 +278,8 @@ impl Output {
     fn new() -> Self {
         let win_size = terminal::size()
             .map(|(x, y)| (x as usize, y as usize))
-            .unwrap();
+            .unwrap_or((80, 24));
         Self {
-            win_size,
             editor_contents: EditorContents::new(),
             cursor_controller: CursorController::new(win_size),
         }

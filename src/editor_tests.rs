@@ -36,7 +36,7 @@ mod tests {
         key_events.push(create_key_event(KeyCode::Char('e')));
         key_events.push(create_key_event(KeyCode::Char('d')));
         key_events.push(create_key_event(KeyCode::Esc));
-        add_repeated_keys(&mut key_events, KeyCode::Char('l'), 11);
+        add_repeated_keys(&mut key_events, KeyCode::Char('l'), 12);
         key_events.push(create_key_event(KeyCode::Char('i')));
         add_repeated_keys(&mut key_events, KeyCode::Delete, 11);
         key_events.push(create_key_event(KeyCode::Esc));
