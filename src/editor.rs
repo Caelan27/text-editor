@@ -149,7 +149,6 @@ impl Output {
         let cursor_x = self.cursor_controller.cursor_x;
         let cursor_y = self.cursor_controller.cursor_y;
 
-        let num_lines = lines.len();
         let cur_top_of_screen = self.scroll_y;
         let cur_bottom_of_screen = cur_top_of_screen + self.cursor_controller.screen_rows - 1;
 
@@ -162,8 +161,7 @@ impl Output {
         self.cursor_controller.relative_y = cursor_y.saturating_sub(self.scroll_y);
 
         let cur_top_of_screen = self.scroll_y;
-        let cur_bottom_of_screen =
-            (cur_top_of_screen + self.cursor_controller.screen_rows).min(num_lines - 1);
+        let cur_bottom_of_screen = cur_top_of_screen + self.cursor_controller.screen_rows - 1;
 
         let lines = &piece_table.lines();
         let displayed_lines = &lines[self.scroll_y..cur_bottom_of_screen + 1];
