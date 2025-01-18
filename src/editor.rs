@@ -144,8 +144,6 @@ impl Output {
             cursor::MoveTo(0, 0)
         )?;
 
-        let lines = piece_table.lines();
-
         let cursor_x = self.cursor_controller.cursor_x;
         let cursor_y = self.cursor_controller.cursor_y;
 
