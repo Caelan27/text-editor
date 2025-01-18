@@ -1,4 +1,3 @@
-use crate::file;
 use crate::piece_table::PieceTable;
 use crossterm::event::*;
 use crossterm::terminal::ClearType;
@@ -15,37 +14,13 @@ impl Drop for CleanUp {
     }
 }
 
-pub fn create_key_event(code: KeyCode) -> KeyEvent {
-    KeyEvent {
-        code,
-        modifiers: KeyModifiers::NONE,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    }
+pub enum TextType {
+    PieceTable(PieceTable),
+    String(String),
 }
 
-fn find_index(lines: &Vec<String>, x: usize, y: usize) -> Option<usize> {
-    let mut char_count = 0;
-    for (cur_y, line) in lines.iter().enumerate() {
-        if line.is_empty() && cur_y == y {
-            return Some(char_count);
-        }
-
-        for (cur_x, _) in line.chars().enumerate() {
-            if cur_x == x && cur_y == y {
-                return Some(char_count);
-            }
-            char_count += 1;
-            if cur_x + 1 == x && cur_y == y {
-                return Some(char_count);
-            }
-        }
-        char_count += 1;
-    }
-    None
-}
-
-enum Mode {
+#[derive(PartialEq)]
+pub enum Mode {
     Normal,
     Insert,
     // TODO - Command Mode
@@ -53,172 +28,33 @@ enum Mode {
     // TODO - Replace Mode
 }
 
-struct CursorController {
-    cursor_x: usize,
-    cursor_y: usize,
-    max_cursor_x: usize,
-    screen_columns: usize,
-    screen_rows: usize,
+pub struct KeyHandler {
+    pub mode: Mode,
+}
+
+pub struct CursorController {
+    pub cursor_x: usize,
+    pub desired_cursor_x: usize,
+    pub cursor_y: usize,
+
+    pub relative_x: usize,
+    pub relative_y: usize,
+
+    pub screen_columns: usize,
+    pub screen_rows: usize,
 }
 
 impl CursorController {
     fn new(win_size: (usize, usize)) -> Self {
         Self {
             cursor_x: 0,
+            desired_cursor_x: 0,
             cursor_y: 0,
-            max_cursor_x: 0,
+            relative_x: 0,
+            relative_y: 0,
             screen_columns: win_size.0,
             screen_rows: win_size.1,
         }
-    }
-
-    fn insert_keypress(
-        &mut self,
-        key_event: KeyEvent,
-        lines: Vec<String>,
-        mode: &mut Mode,
-        piece_table: &mut PieceTable,
-    ) -> io::Result<bool> {
-        match key_event {
-            KeyEvent {
-                code: KeyCode::Esc, ..
-            } => {
-                *mode = Mode::Normal;
-                if self.cursor_x != 0 {
-                    self.cursor_x -= 1;
-                }
-            }
-
-            KeyEvent {
-                code: KeyCode::Char(ch),
-                ..
-            } => {
-                let x = self.cursor_x;
-                let y = self.cursor_y;
-                let position = find_index(&lines, x, y).unwrap();
-                piece_table.insert(position, &ch.to_string());
-                self.cursor_x += 1;
-            }
-
-            KeyEvent {
-                code: KeyCode::Enter,
-                ..
-            } => {
-                let x = self.cursor_x;
-                let y = self.cursor_y;
-                let position = find_index(&lines, x, y).unwrap();
-                piece_table.insert(position, "\n");
-                self.cursor_y += 1;
-                self.cursor_x = 0;
-            }
-            KeyEvent {
-                code: KeyCode::Backspace,
-                ..
-            } => {
-                let x = self.cursor_x.saturating_sub(1);
-                let y = self.cursor_y;
-
-                if self.cursor_x == 0 {
-                    if self.cursor_y == 0 {
-                        return Ok(true);
-                    }
-                    if let Some(position) = find_index(&lines, 0, self.cursor_y) {
-                        piece_table.delete(position - 1);
-                        self.cursor_x = lines[self.cursor_y - 1].len();
-                        self.cursor_y -= 1;
-                    }
-                } else if let Some(position) = find_index(&lines, x, y) {
-                    piece_table.delete(position);
-                    self.cursor_x = x;
-                }
-            }
-            KeyEvent {
-                code: KeyCode::Delete,
-                ..
-            } => {
-                if self.cursor_x != lines[self.cursor_y].len() {
-                    if let Some(position) = find_index(&lines, self.cursor_x, self.cursor_y) {
-                        piece_table.delete(position);
-                    }
-                }
-            }
-            _ => {}
-        }
-        self.max_cursor_x = self.cursor_x;
-        Ok(true)
-    }
-
-    fn normal_keypress(
-        &mut self,
-        key_event: KeyEvent,
-        lines: Vec<String>,
-        mode: &mut Mode,
-        file_path: String,
-        piece_table: &mut PieceTable,
-    ) -> io::Result<bool> {
-        match key_event {
-            KeyEvent {
-                code: KeyCode::Char('q'),
-                modifiers: event::KeyModifiers::CONTROL,
-                ..
-            } => return Ok(false),
-
-            KeyEvent {
-                code: KeyCode::Char('w'),
-                modifiers: event::KeyModifiers::CONTROL,
-                ..
-            } => {
-                let _ = file::save_file(&file_path, piece_table.to_string());
-            }
-
-            KeyEvent {
-                code: KeyCode::Char('h'),
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => {
-                self.max_cursor_x = self
-                    .max_cursor_x
-                    .min(lines[self.cursor_y].len().saturating_sub(1));
-                self.max_cursor_x = self.max_cursor_x.saturating_sub(1);
-            }
-
-            KeyEvent {
-                code: KeyCode::Char('j'),
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => {
-                if self.cursor_y != self.screen_rows - 1 && self.cursor_y < lines.len() - 1 {
-                    self.cursor_y += 1
-                }
-            }
-            KeyEvent {
-                code: KeyCode::Char('k'),
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => self.cursor_y = self.cursor_y.saturating_sub(1),
-            KeyEvent {
-                code: KeyCode::Char('l'),
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => {
-                self.max_cursor_x += 1;
-                self.max_cursor_x = self
-                    .max_cursor_x
-                    .min(lines[self.cursor_y].len().saturating_sub(1))
-            }
-            KeyEvent {
-                code: KeyCode::Char('i'),
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => *mode = Mode::Insert,
-            _ => {
-                return Ok(true);
-            }
-        }
-        self.cursor_x = self
-            .max_cursor_x
-            .min(lines[self.cursor_y].len().saturating_sub(1));
-        Ok(true)
     }
 }
 
@@ -232,10 +68,6 @@ impl EditorContents {
         Self {
             content: String::new(),
         }
-    }
-
-    fn push(&mut self, ch: char) {
-        self.content.push(ch)
     }
 
     fn push_str(&mut self, string: &str) {
@@ -272,6 +104,7 @@ impl Write for EditorContents {
 struct Output {
     editor_contents: EditorContents,
     cursor_controller: CursorController,
+    scroll_y: usize,
 }
 
 impl Output {
@@ -282,6 +115,7 @@ impl Output {
         Self {
             editor_contents: EditorContents::new(),
             cursor_controller: CursorController::new(win_size),
+            scroll_y: 0,
         }
     }
 
@@ -290,9 +124,16 @@ impl Output {
         execute!(stdout(), cursor::MoveTo(0, 0))
     }
 
-    fn draw_rows(&mut self, piece_table: &PieceTable) {
-        let text = piece_table.to_string();
-        self.editor_contents.push_str(&text);
+    fn draw_rows(&mut self, content: &TextType) {
+        match content {
+            TextType::PieceTable(piece_table) => {
+                let text = piece_table.to_string();
+                self.editor_contents.push_str(&text);
+            }
+            TextType::String(text) => {
+                self.editor_contents.push_str(text);
+            }
+        }
     }
 
     fn refresh_screen(&mut self, piece_table: &PieceTable) -> io::Result<()> {
@@ -303,76 +144,43 @@ impl Output {
             cursor::MoveTo(0, 0)
         )?;
 
+        let lines = piece_table.lines();
+
         let cursor_x = self.cursor_controller.cursor_x;
         let cursor_y = self.cursor_controller.cursor_y;
-        self.draw_rows(piece_table);
+
+        let num_lines = lines.len();
+        let cur_top_of_screen = self.scroll_y;
+        let cur_bottom_of_screen = cur_top_of_screen + self.cursor_controller.screen_rows - 1;
+
+        if cursor_y > cur_bottom_of_screen {
+            self.scroll_y += cursor_y - cur_bottom_of_screen;
+        } else if cursor_y < cur_top_of_screen {
+            self.scroll_y = cursor_y;
+        }
+
+        self.cursor_controller.relative_y = cursor_y.saturating_sub(self.scroll_y);
+
+        let cur_top_of_screen = self.scroll_y;
+        let cur_bottom_of_screen =
+            (cur_top_of_screen + self.cursor_controller.screen_rows).min(num_lines - 1);
+
+        let lines = &piece_table.lines();
+        let displayed_lines = &lines[self.scroll_y..cur_bottom_of_screen + 1];
+
+        self.draw_rows(&TextType::String(displayed_lines.join("\n")));
+
+        let relative_y = self
+            .cursor_controller
+            .cursor_y
+            .saturating_sub(self.scroll_y);
+
         queue!(
             self.editor_contents,
-            cursor::MoveTo(cursor_x as u16, cursor_y as u16),
+            cursor::MoveTo(cursor_x as u16, relative_y as u16),
             cursor::Show
         )?;
         self.editor_contents.flush()
-    }
-
-    fn normal_keypress(&mut self, key_event: KeyEvent, lines: Vec<String>) -> io::Result<bool> {
-        match key_event {
-            KeyEvent {
-                code: KeyCode::Char('q'),
-                modifiers: event::KeyModifiers::CONTROL,
-                ..
-            } => return Ok(false),
-
-            KeyEvent {
-                code: KeyCode::Char('h'),
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => {
-                self.cursor_controller.max_cursor_x = self
-                    .cursor_controller
-                    .max_cursor_x
-                    .min(lines[self.cursor_controller.cursor_y].len() - 1);
-                self.cursor_controller.max_cursor_x =
-                    self.cursor_controller.max_cursor_x.saturating_sub(1);
-            }
-
-            KeyEvent {
-                code: KeyCode::Char('j'),
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => {
-                if self.cursor_controller.cursor_y != self.cursor_controller.screen_rows - 1
-                    && self.cursor_controller.cursor_y < lines.len() - 1
-                {
-                    self.cursor_controller.cursor_y += 1
-                }
-            }
-            KeyEvent {
-                code: KeyCode::Char('k'),
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => {
-                self.cursor_controller.cursor_y = self.cursor_controller.cursor_y.saturating_sub(1)
-            }
-            KeyEvent {
-                code: KeyCode::Char('l'),
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => {
-                self.cursor_controller.max_cursor_x += 1;
-                self.cursor_controller.max_cursor_x = self
-                    .cursor_controller
-                    .max_cursor_x
-                    .min(lines[self.cursor_controller.cursor_y].len() - 1)
-            }
-            _ => {
-                return Ok(true);
-            }
-        }
-        self.cursor_controller.cursor_x = self
-            .cursor_controller
-            .max_cursor_x
-            .min(lines[self.cursor_controller.cursor_y].len() - 1);
-        Ok(true)
     }
 }
 
@@ -392,7 +200,7 @@ pub struct Editor {
     reader: Reader,
     output: Output,
     piece_table: PieceTable,
-    mode: Mode,
+    key_handler: KeyHandler,
     file_path: String,
 }
 
@@ -402,7 +210,7 @@ impl Default for Editor {
             reader: Reader,
             output: Output::new(),
             piece_table: PieceTable::default(),
-            mode: Mode::Normal,
+            key_handler: KeyHandler::new(),
             file_path: String::new(),
         }
     }
@@ -414,7 +222,7 @@ impl Editor {
             reader: Reader,
             output: Output::new(),
             piece_table: PieceTable::new(original_text),
-            mode: Mode::Normal,
+            key_handler: KeyHandler::new(),
             file_path,
         }
     }
@@ -423,19 +231,19 @@ impl Editor {
         let key_event = self.reader.read_key()?;
         let lines = self.piece_table.lines();
 
-        match self.mode {
-            Mode::Normal => self.output.cursor_controller.normal_keypress(
+        match self.key_handler.mode {
+            Mode::Normal => self.key_handler.normal_keypress(
                 key_event,
                 lines,
-                &mut self.mode,
                 self.file_path.clone(),
                 &mut self.piece_table,
+                &mut self.output.cursor_controller,
             ),
-            Mode::Insert => self.output.cursor_controller.insert_keypress(
+            Mode::Insert => self.key_handler.insert_keypress(
                 key_event,
                 lines,
-                &mut self.mode,
                 &mut self.piece_table,
+                &mut self.output.cursor_controller,
             ),
         }
     }
@@ -443,25 +251,26 @@ impl Editor {
     fn test_process_keypress(&mut self, key_event: KeyEvent) -> io::Result<bool> {
         let lines = self.piece_table.lines();
 
-        match self.mode {
-            Mode::Normal => self.output.cursor_controller.normal_keypress(
+        match self.key_handler.mode {
+            Mode::Normal => self.key_handler.normal_keypress(
                 key_event,
                 lines,
-                &mut self.mode,
                 self.file_path.clone(),
                 &mut self.piece_table,
+                &mut self.output.cursor_controller,
             ),
-            Mode::Insert => self.output.cursor_controller.insert_keypress(
+            Mode::Insert => self.key_handler.insert_keypress(
                 key_event,
                 lines,
-                &mut self.mode,
                 &mut self.piece_table,
+                &mut self.output.cursor_controller,
             ),
         }
     }
 
     pub fn run(&mut self) -> io::Result<bool> {
         self.output.refresh_screen(&self.piece_table)?;
+        self.piece_table.merge();
         self.process_keypress()
     }
 

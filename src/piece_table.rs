@@ -1,6 +1,10 @@
-#![allow(unused_variables, dead_code)]
-
 use std::fmt;
+
+#[derive(Debug)]
+pub enum FindIndexError {
+    OutOfBounds,
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum BufferType {
     Original,
@@ -60,6 +64,29 @@ impl PieceTable {
         }
     }
 
+    pub fn merge(&mut self) {
+        let mut entry_no = 1;
+        while entry_no < self.table.len() {
+            let last_entry = &self.table[entry_no - 1];
+            let cur_entry = &self.table[entry_no];
+
+            if last_entry.start_index + last_entry.length == cur_entry.start_index
+                && last_entry.source == cur_entry.source
+            {
+                let new_entry = Piece {
+                    source: last_entry.source.clone(),
+                    start_index: last_entry.start_index,
+                    length: last_entry.length + cur_entry.length,
+                };
+                self.table.insert(entry_no - 1, new_entry);
+                self.table.remove(entry_no);
+                self.table.remove(entry_no);
+            } else {
+                entry_no += 1;
+            }
+        }
+    }
+
     pub fn append(&mut self, text: &str) {
         let position = self.table.iter().map(|piece| piece.length).sum::<usize>();
 
@@ -71,6 +98,26 @@ impl PieceTable {
             .lines()
             .map(|line| line.to_string())
             .collect()
+    }
+
+    pub fn find_index(&self, x: usize, y: usize) -> Result<usize, FindIndexError> {
+        let mut cur_index = 0;
+        for (cur_y, line) in self.to_string().lines().enumerate() {
+            if line.is_empty() && cur_y == y {
+                return Ok(cur_index);
+            }
+            for (cur_x, _) in line.chars().enumerate() {
+                if cur_x == x && cur_y == y {
+                    return Ok(cur_index);
+                }
+                cur_index += 1;
+                if cur_x == x && cur_y == y {
+                    return Ok(cur_index);
+                }
+            }
+            cur_index += 1;
+        }
+        Err(FindIndexError::OutOfBounds)
     }
 
     pub fn index(&self, i: usize) -> Option<char> {
@@ -100,7 +147,6 @@ impl PieceTable {
         for (entry_index, entry) in self.table.iter().enumerate() {
             let end_index = cur_index + entry.length;
             if position >= cur_index && position < end_index {
-                let entry_position = position - cur_index;
                 split_index = Some((entry_index, position - cur_index));
             }
             cur_index += entry.length;
@@ -157,7 +203,6 @@ impl PieceTable {
         for (entry_index, entry) in self.table.iter_mut().enumerate() {
             let end_index = cur_index + entry.length;
             if position >= cur_index && position < end_index {
-                let entry_position = position - cur_index;
                 split_index = Some((entry_index, position - cur_index));
                 break;
             }
@@ -166,7 +211,6 @@ impl PieceTable {
         if let Some((entry_index, entry_position)) = split_index {
             let original_entry = self.table[entry_index].clone();
 
-            let end = original_entry.length - 1;
             let original_buffer_type = &original_entry.source;
             if entry_position == 0 {
                 let added = Piece {

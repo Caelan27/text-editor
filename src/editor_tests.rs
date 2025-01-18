@@ -1,11 +1,13 @@
 #[cfg(test)]
 mod tests {
-    use crate::editor::{create_key_event, CleanUp, Editor};
+    use crate::editor::Editor;
     use crate::file;
-    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use crate::utils::{control_key_event, create_key_event, string_to_key_events};
+    use crossterm::event::{KeyCode, KeyEvent};
     use std::fs;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
     #[test]
     fn test_editor_flow() -> Result<(), Box<dyn std::error::Error>> {
         let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
@@ -23,35 +25,21 @@ mod tests {
         }
 
         let mut key_events = Vec::new();
-        add_repeated_keys(&mut key_events, KeyCode::Char('l'), 9);
         key_events.push(create_key_event(KeyCode::Char('j')));
+        add_repeated_keys(&mut key_events, KeyCode::Char('l'), 9);
 
         key_events.push(create_key_event(KeyCode::Char('i')));
-        key_events.push(create_key_event(KeyCode::Char('n')));
-        key_events.push(create_key_event(KeyCode::Char(' ')));
-        key_events.push(create_key_event(KeyCode::Char('e')));
-        key_events.push(create_key_event(KeyCode::Char('d')));
-        key_events.push(create_key_event(KeyCode::Char('i')));
-        key_events.push(create_key_event(KeyCode::Char('t')));
-        key_events.push(create_key_event(KeyCode::Char('e')));
-        key_events.push(create_key_event(KeyCode::Char('d')));
+
+        key_events.extend(string_to_key_events(String::from("n edited")));
+
         key_events.push(create_key_event(KeyCode::Esc));
         add_repeated_keys(&mut key_events, KeyCode::Char('l'), 12);
         key_events.push(create_key_event(KeyCode::Char('i')));
         add_repeated_keys(&mut key_events, KeyCode::Delete, 11);
         key_events.push(create_key_event(KeyCode::Esc));
-        key_events.push(KeyEvent {
-            code: KeyCode::Char('w'),
-            modifiers: KeyModifiers::CONTROL,
-            kind: KeyEventKind::Press,
-            state: KeyEventState::NONE,
-        });
-        key_events.push(KeyEvent {
-            code: KeyCode::Char('q'),
-            modifiers: KeyModifiers::CONTROL,
-            kind: KeyEventKind::Press,
-            state: KeyEventState::NONE,
-        });
+
+        key_events.push(control_key_event(KeyCode::Char('w')));
+        key_events.push(control_key_event(KeyCode::Char('q')));
 
         for key_event in key_events {
             println!();
