@@ -20,7 +20,7 @@ impl KeyHandler {
     pub fn insert_keypress(
         &mut self,
         key_event: KeyEvent,
-        lines: Vec<String>,
+        lines: &[String],
         piece_table: &mut PieceTable,
         cursor_controller: &mut CursorController,
     ) -> io::Result<bool> {
@@ -57,7 +57,7 @@ impl KeyHandler {
     pub fn normal_keypress(
         &mut self,
         key_event: KeyEvent,
-        lines: Vec<String>,
+        lines: &[String],
         file_path: String,
         piece_table: &mut PieceTable,
         cursor_controller: &mut CursorController,
@@ -87,19 +87,19 @@ impl KeyHandler {
                 code: KeyCode::Char('j'),
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => move_down(cursor_controller, &lines),
+            } => move_down(cursor_controller, lines),
 
             KeyEvent {
                 code: KeyCode::Char('k'),
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => move_up(cursor_controller, &lines),
+            } => move_up(cursor_controller, lines),
 
             KeyEvent {
                 code: KeyCode::Char('l'),
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => move_right(cursor_controller, &lines),
+            } => move_right(cursor_controller, lines),
 
             KeyEvent {
                 code: KeyCode::Char('i'),
@@ -158,27 +158,25 @@ fn move_right(cursor_controller: &mut CursorController, lines: &[String]) {
 }
 
 fn delete(
-    lines: Vec<String>,
+    lines: &[String],
     piece_table: &mut PieceTable,
     cursor_controller: &mut CursorController,
 ) {
     if cursor_controller.cursor_x != lines[cursor_controller.cursor_y].len() {
         if let Some(position) = find_index(
-            &lines,
+            lines,
             cursor_controller.cursor_x,
             cursor_controller.cursor_y,
         ) {
             piece_table.delete(position);
-            dbg!("1");
         }
-    } else if let Some(position) = find_index(&lines, 0, cursor_controller.cursor_y + 1) {
-        dbg!("dbg");
+    } else if let Some(position) = find_index(lines, 0, cursor_controller.cursor_y + 1) {
         piece_table.delete(position - 1);
     }
 }
 
 fn backspace(
-    lines: Vec<String>,
+    lines: &[String],
     piece_table: &mut PieceTable,
     cursor_controller: &mut CursorController,
 ) {
@@ -189,39 +187,36 @@ fn backspace(
         if cursor_controller.cursor_y == 0 {
             return;
         }
-        if let Some(position) = find_index(&lines, 0, cursor_controller.cursor_y) {
+        if let Some(position) = find_index(lines, 0, cursor_controller.cursor_y) {
             piece_table.delete(position - 1);
             cursor_controller.cursor_x = lines[cursor_controller.cursor_y - 1].len();
             cursor_controller.cursor_y -= 1;
         }
-    } else if let Some(position) = find_index(&lines, x, y) {
+    } else if let Some(position) = find_index(lines, x, y) {
         piece_table.delete(position);
         cursor_controller.cursor_x = x;
     }
 }
 
-fn enter(
-    lines: Vec<String>,
-    piece_table: &mut PieceTable,
-    cursor_controller: &mut CursorController,
-) {
+fn enter(lines: &[String], piece_table: &mut PieceTable, cursor_controller: &mut CursorController) {
     let x = cursor_controller.cursor_x;
     let y = cursor_controller.cursor_y;
-    let position = find_index(&lines, x, y).unwrap();
+    let position = find_index(lines, x, y).unwrap();
     piece_table.insert(position, "\n");
     cursor_controller.cursor_y += 1;
     cursor_controller.cursor_x = 0;
 }
 
 fn type_char(
-    lines: Vec<String>,
+    lines: &[String],
     piece_table: &mut PieceTable,
     cursor_controller: &mut CursorController,
     ch: char,
 ) {
     let x = cursor_controller.cursor_x;
     let y = cursor_controller.cursor_y;
-    let position = find_index(&lines, x, y).unwrap();
+    dbg!(x, y, lines, lines.len());
+    let position = find_index(lines, x, y).unwrap();
     piece_table.insert(position, &ch.to_string());
     cursor_controller.cursor_x += 1;
 }

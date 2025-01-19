@@ -144,8 +144,6 @@ impl Output {
             cursor::MoveTo(0, 0)
         )?;
 
-        let lines = piece_table.lines();
-
         let cursor_x = self.cursor_controller.cursor_x;
         let cursor_y = self.cursor_controller.cursor_y;
 
@@ -164,7 +162,7 @@ impl Output {
         let cur_bottom_of_screen = cur_top_of_screen + self.cursor_controller.screen_rows - 1;
 
         let lines = &piece_table.lines();
-        let end_of_displayed = (&lines.len() - 1).min(cur_bottom_of_screen + 1);
+        let end_of_displayed = (lines.len()).min(cur_bottom_of_screen + 1);
         let displayed_lines = &lines[self.scroll_y..end_of_displayed];
 
         self.draw_rows(&TextType::String(displayed_lines.join("\n")));
@@ -233,14 +231,14 @@ impl Editor {
         match self.key_handler.mode {
             Mode::Normal => self.key_handler.normal_keypress(
                 key_event,
-                lines,
+                &lines,
                 self.file_path.clone(),
                 &mut self.piece_table,
                 &mut self.output.cursor_controller,
             ),
             Mode::Insert => self.key_handler.insert_keypress(
                 key_event,
-                lines,
+                &lines,
                 &mut self.piece_table,
                 &mut self.output.cursor_controller,
             ),
@@ -253,14 +251,14 @@ impl Editor {
         match self.key_handler.mode {
             Mode::Normal => self.key_handler.normal_keypress(
                 key_event,
-                lines,
+                &lines,
                 self.file_path.clone(),
                 &mut self.piece_table,
                 &mut self.output.cursor_controller,
             ),
             Mode::Insert => self.key_handler.insert_keypress(
                 key_event,
-                lines,
+                &lines,
                 &mut self.piece_table,
                 &mut self.output.cursor_controller,
             ),
