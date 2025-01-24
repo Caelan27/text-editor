@@ -17,7 +17,6 @@ fn main() -> io::Result<()> {
     } else {
         panic!("Please provide one argument - The file to read");
     }
-    dbg!("Editor stopped");
 
     Ok(())
 }

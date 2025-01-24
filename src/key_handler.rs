@@ -1,9 +1,11 @@
-use crate::editor::{CursorController, KeyHandler, Mode};
+use crate::editor::{BarMode, CursorController, KeyHandler, Mode};
 use crate::file;
+use crate::metadata::FileMetadata;
 use crate::piece_table::PieceTable;
 use crate::utils::find_index;
 use crossterm::event;
 use crossterm::event::*;
+use std::fs::File;
 use std::io;
 
 impl Default for KeyHandler {
@@ -14,7 +16,9 @@ impl Default for KeyHandler {
 
 impl KeyHandler {
     pub fn new() -> Self {
-        KeyHandler { mode: Mode::Normal }
+        KeyHandler {
+            mode: Mode::Normal(None),
+        }
     }
 
     pub fn insert_keypress(
@@ -105,13 +109,56 @@ impl KeyHandler {
                 code: KeyCode::Char('i'),
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => handle_insert_key(cursor_controller, &mut self.mode, false),
+            } => handle_insert_key(cursor_controller, &mut self.mode, false, &lines),
 
             KeyEvent {
                 code: KeyCode::Char('a'),
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => handle_insert_key(cursor_controller, &mut self.mode, true),
+            } => handle_insert_key(cursor_controller, &mut self.mode, true, &lines),
+
+            KeyEvent {
+                code: KeyCode::Char(':'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => switch_mode(
+                Mode::Command {
+                    previous_chars: Vec::new(),
+                },
+                &mut self.mode,
+            ),
+
+            _ => {}
+        }
+
+        Ok(true)
+    }
+
+    pub fn command_keypress(
+        &mut self,
+        key_event: KeyEvent,
+        piece_table: &mut PieceTable,
+        metadata: &mut FileMetadata,
+    ) -> io::Result<bool> {
+        match key_event {
+            KeyEvent {
+                code: KeyCode::Char(ch),
+                ..
+            } => type_command(&mut self.mode, ch),
+
+            KeyEvent {
+                code: KeyCode::Esc, ..
+            } => switch_mode(Mode::Normal(None), &mut self.mode),
+
+            KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            } => return execute_command(&mut self.mode, piece_table, metadata),
+
+            KeyEvent {
+                code: KeyCode::Backspace,
+                ..
+            } => command_backspace(&mut self.mode),
 
             _ => {}
         }
@@ -122,6 +169,50 @@ impl KeyHandler {
 
 fn quit() -> io::Result<bool> {
     Ok(false)
+}
+
+fn command_backspace(mode: &mut Mode) {
+    if let Mode::Command { previous_chars } = mode {
+        if !previous_chars.is_empty() {
+            previous_chars.pop();
+        } else {
+            switch_mode(Mode::Normal(None), mode);
+        }
+    }
+}
+fn execute_command(
+    mode: &mut Mode,
+    piece_table: &mut PieceTable,
+    metadata: &mut FileMetadata,
+) -> io::Result<bool> {
+    if let Mode::Command {
+        previous_chars: chars,
+    } = mode
+    {
+        let target_mode = match chars[..] {
+            ['q'] => return quit(),
+            ['w'] => {
+                write_file(piece_table, metadata.file_path.clone());
+                let file = File::open(metadata.file_path.clone())?;
+                let file_size = file.metadata()?.len();
+                metadata.update(file_size as usize);
+                Mode::Normal(Some(BarMode::Write))
+            }
+            ['w', 'q'] => {
+                write_file(piece_table, metadata.file_path.clone());
+                return quit();
+            }
+            _ => Mode::Normal(None),
+        };
+        switch_mode(target_mode, mode);
+    }
+    Ok(true)
+}
+
+fn type_command(mode: &mut Mode, ch: char) {
+    if let Mode::Command { previous_chars } = mode {
+        previous_chars.push(ch);
+    }
 }
 
 fn write_file(piece_table: &mut PieceTable, file_path: String) {
@@ -169,10 +260,8 @@ fn delete(
             cursor_controller.cursor_y,
         ) {
             piece_table.delete(position);
-            dbg!("1");
         }
     } else if let Some(position) = find_index(&lines, 0, cursor_controller.cursor_y + 1) {
-        dbg!("dbg");
         piece_table.delete(position - 1);
     }
 }
@@ -230,12 +319,18 @@ fn handle_escape_key(cursor_controller: &mut CursorController, mode: &mut Mode) 
     if cursor_controller.cursor_x != 0 {
         cursor_controller.cursor_x -= 1;
     }
-    switch_mode(Mode::Normal, mode);
+    switch_mode(Mode::Normal(None), mode);
 }
 
-fn handle_insert_key(cursor_controller: &mut CursorController, mode: &mut Mode, shift_right: bool) {
+fn handle_insert_key(
+    cursor_controller: &mut CursorController,
+    mode: &mut Mode,
+    shift_right: bool,
+    lines: &[String],
+) {
     switch_mode(Mode::Insert, mode);
-    if shift_right {
+    let cur_line_len = lines[cursor_controller.cursor_y].len();
+    if shift_right && cur_line_len != 0 {
         cursor_controller.cursor_x += 1;
     }
 }

@@ -1,3 +1,4 @@
+use crate::metadata::FileMetadata;
 use crate::piece_table::PieceTable;
 use crossterm::event::*;
 use crossterm::terminal::ClearType;
@@ -20,10 +21,15 @@ pub enum TextType {
 }
 
 #[derive(PartialEq)]
+pub enum BarMode {
+    Write,
+}
+
+#[derive(PartialEq)]
 pub enum Mode {
-    Normal,
+    Normal(Option<BarMode>),
     Insert,
-    // TODO - Command Mode
+    Command { previous_chars: Vec<char> },
     // TODO - Visual Mode
     // TODO - Replace Mode
 }
@@ -124,19 +130,16 @@ impl Output {
         execute!(stdout(), cursor::MoveTo(0, 0))
     }
 
-    fn draw_rows(&mut self, content: &TextType) {
-        match content {
-            TextType::PieceTable(piece_table) => {
-                let text = piece_table.to_string();
-                self.editor_contents.push_str(&text);
-            }
-            TextType::String(text) => {
-                self.editor_contents.push_str(text);
-            }
-        }
+    fn draw_rows(&mut self, content: String) {
+        self.editor_contents.push_str(&content);
     }
 
-    fn refresh_screen(&mut self, piece_table: &PieceTable) -> io::Result<()> {
+    fn refresh_screen(
+        &mut self,
+        piece_table: &PieceTable,
+        mode: &Mode,
+        metadata: &FileMetadata,
+    ) -> io::Result<()> {
         queue!(
             self.editor_contents,
             cursor::Hide,
@@ -144,11 +147,11 @@ impl Output {
             cursor::MoveTo(0, 0)
         )?;
 
-        let cursor_x = self.cursor_controller.cursor_x;
+        let content_rows = self.cursor_controller.screen_rows - 2;
         let cursor_y = self.cursor_controller.cursor_y;
 
         let cur_top_of_screen = self.scroll_y;
-        let cur_bottom_of_screen = cur_top_of_screen + self.cursor_controller.screen_rows - 1;
+        let cur_bottom_of_screen = cur_top_of_screen + content_rows - 1;
 
         if cursor_y > cur_bottom_of_screen {
             self.scroll_y += cursor_y - cur_bottom_of_screen;
@@ -159,21 +162,96 @@ impl Output {
         self.cursor_controller.relative_y = cursor_y.saturating_sub(self.scroll_y);
 
         let cur_top_of_screen = self.scroll_y;
-        let cur_bottom_of_screen = cur_top_of_screen + self.cursor_controller.screen_rows - 1;
+        let cur_bottom_of_screen = cur_top_of_screen + content_rows - 1;
 
         let lines = &piece_table.lines();
-        let displayed_lines = &lines[self.scroll_y..cur_bottom_of_screen + 1];
+        let num_lines = lines.len();
+        let mut displayed_lines = if num_lines < cur_bottom_of_screen + 1 {
+            &lines[self.scroll_y..num_lines]
+        } else {
+            &lines[self.scroll_y..cur_bottom_of_screen + 1]
+        }
+        .to_vec();
+        if num_lines < cur_bottom_of_screen + 1 {
+            for _ in 0..(cur_bottom_of_screen + 1 - num_lines) {
+                displayed_lines.push("".to_string());
+            }
+        }
 
-        self.draw_rows(&TextType::String(displayed_lines.join("\n")));
+        self.draw_rows(displayed_lines.join("\n"));
 
-        let relative_y = self
-            .cursor_controller
-            .cursor_y
-            .saturating_sub(self.scroll_y);
+        let file_path = metadata.file_path.to_string();
+        let line_percent = if lines.is_empty() || lines.len() == 1 {
+            "Top"
+        } else {
+            match 100 * self.cursor_controller.cursor_y / (lines.len() - 1) {
+                100 => "Bot",
+                0 => "Top",
+                percent => &format!("{}%", percent),
+            }
+        };
+        let left_part = format!(
+            "{},{}        {}",
+            self.cursor_controller.cursor_y + 1,
+            self.cursor_controller.cursor_x + 1,
+            line_percent
+        );
+
+        let remaining_space =
+            self.cursor_controller.screen_columns - file_path.len() - left_part.len();
+
+        let spaces = " ".repeat(remaining_space);
+
+        self.draw_rows(format!("\n{file_path}{spaces}{left_part}"));
+
+        let (cursor_x, cursor_y) = match mode {
+            Mode::Insert => {
+                self.draw_rows("\n-- INSERT --".to_string());
+                (
+                    self.cursor_controller.cursor_x,
+                    self.cursor_controller
+                        .cursor_y
+                        .saturating_sub(self.scroll_y),
+                )
+            }
+            Mode::Command { previous_chars } => {
+                let mut chars = ":".to_string();
+                for ch in previous_chars {
+                    chars.push(*ch);
+                }
+                self.draw_rows(format!("\n{chars}"));
+                let cursor_y = self.cursor_controller.screen_rows - 1;
+                let cursor_x = previous_chars.len() + 1;
+                (cursor_x, cursor_y)
+            }
+            Mode::Normal(Some(BarMode::Write)) => {
+                let file_path = metadata.file_path.clone();
+                let num_lines = lines.len();
+                let file_size = metadata.file_size.unwrap();
+
+                let file_path = format!(r##""{file_path}""##);
+                let num_lines = format!("{num_lines}L");
+                let file_size = format!("{file_size}B written");
+
+                self.draw_rows(format!("\n{file_path} {num_lines}, {file_size}"));
+                (
+                    self.cursor_controller.cursor_x,
+                    self.cursor_controller
+                        .cursor_y
+                        .saturating_sub(self.scroll_y),
+                )
+            }
+            _ => (
+                self.cursor_controller.cursor_x,
+                self.cursor_controller
+                    .cursor_y
+                    .saturating_sub(self.scroll_y),
+            ),
+        };
 
         queue!(
             self.editor_contents,
-            cursor::MoveTo(cursor_x as u16, relative_y as u16),
+            cursor::MoveTo(cursor_x as u16, cursor_y as u16),
             cursor::Show
         )?;
         self.editor_contents.flush()
@@ -197,7 +275,7 @@ pub struct Editor {
     output: Output,
     piece_table: PieceTable,
     key_handler: KeyHandler,
-    file_path: String,
+    metadata: FileMetadata,
 }
 
 impl Default for Editor {
@@ -207,7 +285,7 @@ impl Default for Editor {
             output: Output::new(),
             piece_table: PieceTable::default(),
             key_handler: KeyHandler::new(),
-            file_path: String::new(),
+            metadata: FileMetadata::new(String::new()),
         }
     }
 }
@@ -219,7 +297,7 @@ impl Editor {
             output: Output::new(),
             piece_table: PieceTable::new(original_text),
             key_handler: KeyHandler::new(),
-            file_path,
+            metadata: FileMetadata::new(file_path),
         }
     }
 
@@ -228,10 +306,10 @@ impl Editor {
         let lines = self.piece_table.lines();
 
         match self.key_handler.mode {
-            Mode::Normal => self.key_handler.normal_keypress(
+            Mode::Normal(_) => self.key_handler.normal_keypress(
                 key_event,
                 lines,
-                self.file_path.clone(),
+                self.metadata.file_path.clone(),
                 &mut self.piece_table,
                 &mut self.output.cursor_controller,
             ),
@@ -240,6 +318,11 @@ impl Editor {
                 lines,
                 &mut self.piece_table,
                 &mut self.output.cursor_controller,
+            ),
+            Mode::Command { .. } => self.key_handler.command_keypress(
+                key_event,
+                &mut self.piece_table,
+                &mut self.metadata,
             ),
         }
     }
@@ -248,10 +331,10 @@ impl Editor {
         let lines = self.piece_table.lines();
 
         match self.key_handler.mode {
-            Mode::Normal => self.key_handler.normal_keypress(
+            Mode::Normal(_) => self.key_handler.normal_keypress(
                 key_event,
                 lines,
-                self.file_path.clone(),
+                self.metadata.file_path.clone(),
                 &mut self.piece_table,
                 &mut self.output.cursor_controller,
             ),
@@ -261,17 +344,24 @@ impl Editor {
                 &mut self.piece_table,
                 &mut self.output.cursor_controller,
             ),
+            Mode::Command { .. } => self.key_handler.command_keypress(
+                key_event,
+                &mut self.piece_table,
+                &mut self.metadata,
+            ),
         }
     }
 
     pub fn run(&mut self) -> io::Result<bool> {
-        self.output.refresh_screen(&self.piece_table)?;
+        self.output
+            .refresh_screen(&self.piece_table, &self.key_handler.mode, &self.metadata)?;
         self.piece_table.merge();
         self.process_keypress()
     }
 
     pub fn test_run(&mut self, key_event: KeyEvent) -> io::Result<bool> {
-        self.output.refresh_screen(&self.piece_table)?;
+        self.output
+            .refresh_screen(&self.piece_table, &self.key_handler.mode, &self.metadata)?;
         self.test_process_keypress(key_event)
     }
 }
