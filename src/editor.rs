@@ -274,10 +274,8 @@ impl Output {
     }
 
     fn draw_content(&mut self, piece_table: &PieceTable) {
-        dbg!(self.editor_view.scroll_y);
         self.editor_view.update_scroll();
 
-        dbg!(self.editor_view.scroll_y);
         let lines = piece_table.lines();
         let start = self.editor_view.scroll_y;
         let end = std::cmp::min(
