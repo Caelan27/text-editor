@@ -39,27 +39,94 @@ pub struct KeyHandler {
 }
 
 pub struct CursorController {
-    pub cursor_x: usize,
-    pub desired_cursor_x: usize,
-    pub cursor_y: usize,
+    cursor_x: usize,
+    desired_cursor_x: usize,
+    cursor_y: usize,
 
-    pub relative_x: usize,
-    pub relative_y: usize,
+    relative_x: usize,
+    relative_y: usize,
 
-    pub screen_columns: usize,
-    pub screen_rows: usize,
+    screen_columns: usize,
+    screen_rows: usize,
 }
 
 impl CursorController {
-    fn new(win_size: (usize, usize)) -> Self {
+    fn new(window_size: (usize, usize)) -> Self {
         Self {
             cursor_x: 0,
             desired_cursor_x: 0,
             cursor_y: 0,
             relative_x: 0,
             relative_y: 0,
-            screen_columns: win_size.0,
-            screen_rows: win_size.1,
+            screen_columns: window_size.0,
+            screen_rows: window_size.1,
+        }
+    }
+
+    pub fn cursor_x(&self) -> usize {
+        self.cursor_x
+    }
+
+    pub fn cursor_y(&self) -> usize {
+        self.cursor_y
+    }
+
+    pub fn screen_size(&self) -> (usize, usize) {
+        (self.screen_columns, self.screen_rows)
+    }
+
+    pub fn set_cursor_x(&mut self, x: usize) {
+        if x >= self.screen_columns {
+            self.cursor_x = self.screen_columns - 1;
+        } else {
+            self.cursor_x = x;
+        }
+
+        self.desired_cursor_x = self.cursor_x;
+    }
+
+    pub fn set_cursor_y(&mut self, x: usize) {
+        if x >= self.screen_columns {
+            self.cursor_x = self.screen_columns - 1;
+        } else {
+            self.cursor_x = x;
+        }
+
+        self.desired_cursor_x = self.cursor_x;
+    }
+}
+
+pub struct EditorView {
+    cursor_controller: CursorController,
+    scroll_y: usize,
+}
+
+impl EditorView {
+    fn new(window_size: (usize, usize)) -> Self {
+        Self {
+            cursor_controller: CursorController::new(window_size),
+            scroll_y: 0,
+        }
+    }
+
+    fn update_scroll(&mut self) {
+        self.scroll_y = self.adjust_scroll();
+        self.cursor_controller.relative_y = self
+            .cursor_controller
+            .cursor_y
+            .saturating_sub(self.scroll_y);
+    }
+
+    fn adjust_scroll(&self) -> usize {
+        let content_rows = self.cursor_controller.screen_rows - Output::STATUS_BAR_ROWS;
+        let scroll_bottom = self.scroll_y + content_rows - 1;
+
+        if self.cursor_controller.cursor_y > scroll_bottom {
+            self.cursor_controller.cursor_y - scroll_bottom + self.scroll_y
+        } else if self.cursor_controller.cursor_y < self.scroll_y {
+            self.cursor_controller.cursor_y
+        } else {
+            self.scroll_y
         }
     }
 }
@@ -109,19 +176,22 @@ impl Write for EditorContents {
 
 struct Output {
     editor_contents: EditorContents,
-    cursor_controller: CursorController,
-    scroll_y: usize,
+    editor_view: EditorView,
 }
 
 impl Output {
+    const STATUS_BAR_ROWS: usize = 2;
+    const INSERT_MODE_LABEL: &'static str = "-- INSERT --";
+    const DEFAULT_WINDOW_SIZE: (usize, usize) = (80, 24);
+    const COMMAND_CURSOR_Y_OFFSET: usize = 1;
+
     fn new() -> Self {
-        let win_size = terminal::size()
+        let window_size = terminal::size()
             .map(|(x, y)| (x as usize, y as usize))
-            .unwrap_or((80, 24));
+            .unwrap_or(Self::DEFAULT_WINDOW_SIZE);
         Self {
             editor_contents: EditorContents::new(),
-            cursor_controller: CursorController::new(win_size),
-            scroll_y: 0,
+            editor_view: EditorView::new(window_size),
         }
     }
 
@@ -130,8 +200,92 @@ impl Output {
         execute!(stdout(), cursor::MoveTo(0, 0))
     }
 
-    fn draw_rows(&mut self, content: String) {
-        self.editor_contents.push_str(&content);
+    fn calculate_line_percent(lines: &[String], cursor_y: usize) -> String {
+        if lines.is_empty() || lines.len() == 1 {
+            "Top".to_string()
+        } else {
+            match 100 * cursor_y / (lines.len() - 1) {
+                100 => "Bot".to_string(),
+                0 => "Top".to_string(),
+                percent => format!("{}%", percent),
+            }
+        }
+    }
+
+    fn draw_rows(&mut self, content: &[String]) {
+        self.editor_contents.push_str(&content.join("\n"));
+    }
+
+    fn draw_content(&mut self, piece_table: &PieceTable) {
+        dbg!(self.editor_view.scroll_y);
+        self.editor_view.update_scroll();
+
+        dbg!(self.editor_view.scroll_y);
+        let lines = piece_table.lines();
+        let start = self.editor_view.scroll_y;
+        let end = std::cmp::min(
+            lines.len(),
+            start + self.editor_view.cursor_controller.screen_rows - 2,
+        );
+
+        self.draw_rows(&lines[start..end]);
+        self.fill_screen(start + self.editor_view.cursor_controller.screen_rows - end - 1);
+    }
+
+    fn fill_screen(&mut self, empty_lines: usize) {
+        let lines = vec!["".to_string(); empty_lines];
+        self.draw_rows(&lines);
+    }
+
+    fn format_status_bar(
+        cursor_controller: &CursorController,
+        metadata: &FileMetadata,
+        line_position: &str,
+    ) -> String {
+        let right_part = format!(
+            "{},{}        {}",
+            cursor_controller.cursor_y + 1,
+            cursor_controller.cursor_x + 1,
+            line_position
+        );
+
+        let remaining_space =
+            cursor_controller.screen_columns - metadata.file_path.len() - right_part.len();
+
+        format!(
+            "\n{}{}{}",
+            metadata.file_path,
+            " ".repeat(remaining_space),
+            right_part
+        )
+    }
+
+    fn draw_status_bar(&mut self, piece_table: &PieceTable, mode: &Mode, metadata: &FileMetadata) {
+        let lines = &piece_table.lines();
+
+        let line_percent =
+            Self::calculate_line_percent(lines, self.editor_view.cursor_controller.cursor_y);
+
+        let status_bar =
+            Self::format_status_bar(&self.editor_view.cursor_controller, metadata, &line_percent);
+
+        self.editor_contents.push_str(&status_bar);
+
+        let mode_label = match mode {
+            Mode::Insert => Self::INSERT_MODE_LABEL.to_string(),
+            Mode::Command { previous_chars } => {
+                format!(":{}", previous_chars.iter().collect::<String>())
+            }
+            Mode::Normal(Some(BarMode::Write)) => format!(
+                "\"{}\" {}L, {}B written",
+                metadata.file_path,
+                lines.len(),
+                metadata.file_size.unwrap_or(0)
+            ),
+            _ => "".to_string(),
+        };
+
+        self.editor_contents.push_str(&format!("\n{mode_label}"));
     }
 
     fn refresh_screen(
@@ -147,105 +301,35 @@ impl Output {
             cursor::MoveTo(0, 0)
         )?;
 
-        let content_rows = self.cursor_controller.screen_rows - 2;
-        let cursor_y = self.cursor_controller.cursor_y;
-
-        let cur_top_of_screen = self.scroll_y;
-        let cur_bottom_of_screen = cur_top_of_screen + content_rows - 1;
-
-        if cursor_y > cur_bottom_of_screen {
-            self.scroll_y += cursor_y - cur_bottom_of_screen;
-        } else if cursor_y < cur_top_of_screen {
-            self.scroll_y = cursor_y;
-        }
-
-        self.cursor_controller.relative_y = cursor_y.saturating_sub(self.scroll_y);
-
-        let cur_top_of_screen = self.scroll_y;
-        let cur_bottom_of_screen = cur_top_of_screen + content_rows - 1;
-
-        let lines = &piece_table.lines();
-        let num_lines = lines.len();
-        let mut displayed_lines = if num_lines < cur_bottom_of_screen + 1 {
-            &lines[self.scroll_y..num_lines]
-        } else {
-            &lines[self.scroll_y..cur_bottom_of_screen + 1]
-        }
-        .to_vec();
-        if num_lines < cur_bottom_of_screen + 1 {
-            for _ in 0..(cur_bottom_of_screen + 1 - num_lines) {
-                displayed_lines.push("".to_string());
-            }
-        }
-
-        self.draw_rows(displayed_lines.join("\n"));
-
-        let file_path = metadata.file_path.to_string();
-        let line_percent = if lines.is_empty() || lines.len() == 1 {
-            "Top"
-        } else {
-            match 100 * self.cursor_controller.cursor_y / (lines.len() - 1) {
-                100 => "Bot",
-                0 => "Top",
-                percent => &format!("{}%", percent),
-            }
-        };
-        let left_part = format!(
-            "{},{}        {}",
-            self.cursor_controller.cursor_y + 1,
-            self.cursor_controller.cursor_x + 1,
-            line_percent
-        );
-
-        let remaining_space =
-            self.cursor_controller.screen_columns - file_path.len() - left_part.len();
-
-        let spaces = " ".repeat(remaining_space);
-
-        self.draw_rows(format!("\n{file_path}{spaces}{left_part}"));
+        self.draw_content(piece_table);
+        self.draw_status_bar(piece_table, mode, metadata);
 
         let (cursor_x, cursor_y) = match mode {
-            Mode::Insert => {
-                self.draw_rows("\n-- INSERT --".to_string());
-                (
-                    self.cursor_controller.cursor_x,
-                    self.cursor_controller
-                        .cursor_y
-                        .saturating_sub(self.scroll_y),
-                )
-            }
+            Mode::Insert => (
+                self.editor_view.cursor_controller.cursor_x,
+                self.editor_view
+                    .cursor_controller
+                    .cursor_y
+                    .saturating_sub(self.editor_view.scroll_y),
+            ),
             Mode::Command { previous_chars } => {
-                let mut chars = ":".to_string();
-                for ch in previous_chars {
-                    chars.push(*ch);
-                }
-                self.draw_rows(format!("\n{chars}"));
-                let cursor_y = self.cursor_controller.screen_rows - 1;
-                let cursor_x = previous_chars.len() + 1;
+                let cursor_y = self.editor_view.cursor_controller.screen_rows - 1;
+                let cursor_x = previous_chars.len() + Output::COMMAND_CURSOR_Y_OFFSET;
                 (cursor_x, cursor_y)
             }
-            Mode::Normal(Some(BarMode::Write)) => {
-                let file_path = metadata.file_path.clone();
-                let num_lines = lines.len();
-                let file_size = metadata.file_size.unwrap();
-
-                let file_path = format!(r##""{file_path}""##);
-                let num_lines = format!("{num_lines}L");
-                let file_size = format!("{file_size}B written");
-
-                self.draw_rows(format!("\n{file_path} {num_lines}, {file_size}"));
-                (
-                    self.cursor_controller.cursor_x,
-                    self.cursor_controller
-                        .cursor_y
-                        .saturating_sub(self.scroll_y),
-                )
-            }
-            _ => (
-                self.cursor_controller.cursor_x,
-                self.cursor_controller
+            Mode::Normal(Some(BarMode::Write)) => (
+                self.editor_view.cursor_controller.cursor_x,
+                self.editor_view
+                    .cursor_controller
                     .cursor_y
-                    .saturating_sub(self.scroll_y),
+                    .saturating_sub(self.editor_view.scroll_y),
+            ),
+            _ => (
+                self.editor_view.cursor_controller.cursor_x,
+                self.editor_view
+                    .cursor_controller
+                    .cursor_y
+                    .saturating_sub(self.editor_view.scroll_y),
             ),
         };
 
@@ -311,13 +395,13 @@ impl Editor {
                 lines,
                 self.metadata.file_path.clone(),
                 &mut self.piece_table,
-                &mut self.output.cursor_controller,
+                &mut self.output.editor_view.cursor_controller,
             ),
             Mode::Insert => self.key_handler.insert_keypress(
                 key_event,
                 lines,
                 &mut self.piece_table,
-                &mut self.output.cursor_controller,
+                &mut self.output.editor_view.cursor_controller,
             ),
             Mode::Command { .. } => self.key_handler.command_keypress(
                 key_event,
@@ -336,13 +420,13 @@ impl Editor {
                 lines,
                 self.metadata.file_path.clone(),
                 &mut self.piece_table,
-                &mut self.output.cursor_controller,
+                &mut self.output.editor_view.cursor_controller,
             ),
             Mode::Insert => self.key_handler.insert_keypress(
                 key_event,
                 lines,
                 &mut self.piece_table,
-                &mut self.output.cursor_controller,
+                &mut self.output.editor_view.cursor_controller,
             ),
             Mode::Command { .. } => self.key_handler.command_keypress(
                 key_event,
