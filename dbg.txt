@@ -1,0 +1,4 @@
+   Compiling text-editor v0.1.0 (/home/caelan/text-editor)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.79s
+     Running `target/debug/text-editor test_file`
+[src/main.rs:20:5] "Editor stopped" = "Editor stopped"
