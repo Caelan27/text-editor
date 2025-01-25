@@ -3,6 +3,7 @@ use crate::piece_table::PieceTable;
 use crossterm::event::*;
 use crossterm::terminal::ClearType;
 use crossterm::{cursor, event, execute, queue, terminal};
+use log::{error, info};
 use std::io;
 use std::io::{stdout, Write};
 
@@ -10,8 +11,12 @@ pub struct CleanUp;
 
 impl Drop for CleanUp {
     fn drop(&mut self) {
-        terminal::disable_raw_mode().expect("Could not turn off raw mode");
-        Output::clear_screen().expect("Error");
+        if let Err(e) = terminal::disable_raw_mode() {
+            error!("Could not turn off raw mode: {}", e);
+        }
+        if let Err(e) = Output::clear_screen() {
+            error!("Failed to clear screen: {}", e);
+        }
     }
 }
 
@@ -20,22 +25,48 @@ pub enum TextType {
     String(String),
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub enum BarMode {
     Write,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub enum Mode {
     Normal(Option<BarMode>),
     Insert,
-    Command { previous_chars: Vec<char> },
+    Command { previous_chars: String },
     // TODO - Visual Mode
     // TODO - Replace Mode
 }
 
 pub struct KeyHandler {
-    pub mode: Mode,
+    mode: Mode,
+}
+
+impl Default for KeyHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl KeyHandler {
+    pub fn new() -> Self {
+        KeyHandler {
+            mode: Mode::Normal(None),
+        }
+    }
+
+    pub fn mode(&self) -> Mode {
+        self.mode.clone()
+    }
+
+    pub fn set_mode(&mut self, mode: Mode) {
+        self.mode = mode;
+    }
+
+    pub fn get_mode_mut(&mut self) -> &mut Mode {
+        &mut self.mode
+    }
 }
 
 pub struct CursorController {
@@ -43,7 +74,6 @@ pub struct CursorController {
     desired_cursor_x: usize,
     cursor_y: usize,
 
-    relative_x: usize,
     relative_y: usize,
 
     screen_columns: usize,
@@ -56,7 +86,6 @@ impl CursorController {
             cursor_x: 0,
             desired_cursor_x: 0,
             cursor_y: 0,
-            relative_x: 0,
             relative_y: 0,
             screen_columns: window_size.0,
             screen_rows: window_size.1,
@@ -75,9 +104,10 @@ impl CursorController {
         (self.screen_columns, self.screen_rows)
     }
 
-    pub fn set_cursor_x(&mut self, x: usize) {
-        if x >= self.screen_columns {
-            self.cursor_x = self.screen_columns - 1;
+    // Doesn't let you go past the end of the line
+    pub fn set_cursor_x_normal_mode(&mut self, x: usize, line_length: usize) {
+        if x >= line_length {
+            self.cursor_x = line_length - 1;
         } else {
             self.cursor_x = x;
         }
@@ -85,14 +115,38 @@ impl CursorController {
         self.desired_cursor_x = self.cursor_x;
     }
 
-    pub fn set_cursor_y(&mut self, x: usize) {
-        if x >= self.screen_columns {
-            self.cursor_x = self.screen_columns - 1;
+    // Lets you go one space past the end of the line
+    pub fn set_cursor_x_insert_mode(&mut self, x: usize, line_length: usize) {
+        if x > line_length {
+            self.cursor_x = line_length;
         } else {
             self.cursor_x = x;
         }
 
         self.desired_cursor_x = self.cursor_x;
+    }
+
+    pub fn set_cursor_x_no_checks(&mut self, x: usize) {
+        self.cursor_x = x;
+        self.desired_cursor_x = self.cursor_x;
+    }
+
+    pub fn set_cursor_y(&mut self, y: usize, num_lines: usize) {
+        if y >= num_lines {
+            self.cursor_y = num_lines - 1;
+        } else {
+            self.cursor_y = y;
+        }
+    }
+
+    pub fn update_desired_x(&mut self) {
+        self.desired_cursor_x = self.cursor_x;
+    }
+
+    pub fn update_desired_x_if_needed(&mut self, lines: &[String]) {
+        self.cursor_x = self
+            .desired_cursor_x
+            .min(lines[self.cursor_y].len().saturating_sub(1));
     }
 }
 
@@ -188,7 +242,10 @@ impl Output {
     fn new() -> Self {
         let window_size = terminal::size()
             .map(|(x, y)| (x as usize, y as usize))
-            .unwrap_or(Self::DEFAULT_WINDOW_SIZE);
+            .unwrap_or({
+                info!("Could not get window size, using default");
+                Self::DEFAULT_WINDOW_SIZE
+            });
         Self {
             editor_contents: EditorContents::new(),
             editor_view: EditorView::new(window_size),
@@ -274,13 +331,16 @@ impl Output {
         let mode_label = match mode {
             Mode::Insert => Self::INSERT_MODE_LABEL.to_string(),
             Mode::Command { previous_chars } => {
-                format!(":{}", previous_chars.iter().collect::<String>())
+                format!(":{}", previous_chars)
             }
             Mode::Normal(Some(BarMode::Write)) => format!(
                 "\"{}\" {}L, {}B written",
                 metadata.file_path,
                 lines.len(),
-                metadata.file_size.unwrap_or(0)
+                metadata.file_size.unwrap_or({
+                    info!("File size not found");
+                    0
+                })
             ),
             _ => "".to_string(),
         };
