@@ -25,22 +25,22 @@ impl KeyHandler {
             KeyEvent {
                 code: KeyCode::Char(ch),
                 ..
-            } => type_char(lines, piece_table, cursor_controller, ch),
+            } => type_char(&lines, piece_table, cursor_controller, ch),
 
             KeyEvent {
                 code: KeyCode::Enter,
                 ..
-            } => enter(lines, piece_table, cursor_controller),
+            } => enter(&lines, piece_table, cursor_controller),
 
             KeyEvent {
                 code: KeyCode::Backspace,
                 ..
-            } => backspace(lines, piece_table, cursor_controller),
+            } => backspace(&lines, piece_table, cursor_controller),
 
             KeyEvent {
                 code: KeyCode::Delete,
                 ..
-            } => delete(lines, piece_table, cursor_controller),
+            } => delete(&lines, piece_table, cursor_controller),
             _ => {}
         }
 
@@ -237,23 +237,23 @@ fn move_right(cursor_controller: &mut CursorController, lines: &[String]) {
 }
 
 fn delete(
-    lines: Vec<String>,
+    lines: &[String],
     piece_table: &mut PieceTable,
     cursor_controller: &mut CursorController,
 ) {
     let cursor_x = cursor_controller.cursor_x();
     let cursor_y = cursor_controller.cursor_y();
     if cursor_x != lines[cursor_y].len() {
-        if let Some(position) = find_index(&lines, cursor_x, cursor_y) {
+        if let Some(position) = find_index(lines, cursor_x, cursor_y) {
             piece_table.delete(position);
         }
-    } else if let Some(position) = find_index(&lines, 0, cursor_y + 1) {
+    } else if let Some(position) = find_index(lines, 0, cursor_y + 1) {
         piece_table.delete(position - 1);
     }
 }
 
 fn backspace(
-    lines: Vec<String>,
+    lines: &[String],
     piece_table: &mut PieceTable,
     cursor_controller: &mut CursorController,
 ) {
@@ -265,26 +265,22 @@ fn backspace(
         if cursor_y == 0 {
             return;
         }
-        if let Some(position) = find_index(&lines, 0, cursor_y) {
+        if let Some(position) = find_index(lines, 0, cursor_y) {
             piece_table.delete(position - 1);
             cursor_controller
                 .set_cursor_x_insert_mode(lines[cursor_y - 1].len(), lines[cursor_y - 1].len());
             cursor_controller.set_cursor_y(cursor_y - 1, lines.len());
         }
-    } else if let Some(position) = find_index(&lines, delete_x, cursor_y) {
+    } else if let Some(position) = find_index(lines, delete_x, cursor_y) {
         piece_table.delete(position);
         cursor_controller.set_cursor_x_insert_mode(delete_x, lines[cursor_y].len());
     }
 }
 
-fn enter(
-    lines: Vec<String>,
-    piece_table: &mut PieceTable,
-    cursor_controller: &mut CursorController,
-) {
+fn enter(lines: &[String], piece_table: &mut PieceTable, cursor_controller: &mut CursorController) {
     let x = cursor_controller.cursor_x();
     let y = cursor_controller.cursor_y();
-    if let Some(position) = find_index(&lines, x, y) {
+    if let Some(position) = find_index(lines, x, y) {
         piece_table.insert(position, "\n");
         cursor_controller.set_cursor_y(y + 1, piece_table.lines().len());
         cursor_controller
@@ -295,7 +291,7 @@ fn enter(
 }
 
 fn type_char(
-    lines: Vec<String>,
+    lines: &[String],
     piece_table: &mut PieceTable,
     cursor_controller: &mut CursorController,
     ch: char,
@@ -303,7 +299,7 @@ fn type_char(
     let x = cursor_controller.cursor_x();
     let y = cursor_controller.cursor_y();
 
-    if let Some(position) = find_index(&lines, x, y) {
+    if let Some(position) = find_index(lines, x, y) {
         piece_table.insert(position, &ch.to_string());
         cursor_controller.set_cursor_x_insert_mode(x + 1, lines[y].len() + 1);
     } else {
